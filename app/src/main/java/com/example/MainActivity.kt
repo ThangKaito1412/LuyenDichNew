@@ -2600,7 +2600,8 @@ fun PracticeScreenView(
                     val pick = remember { kotlin.random.Random.nextInt(5) }
                     val image by com.example.ui.rememberRemoteImage(
                         key = imageTerm + "|" + viTerm,
-                        queries = listOf(imageTerm, viTerm),
+                        // Ưu tiên tìm theo nghĩa tiếng Việt (ra ảnh sát nghĩa nhất, đã thử nghiệm); chữ Hán chỉ là dự phòng.
+                        queries = listOf(viTerm, imageTerm).distinct(),
                         pick = pick
                     )
                     val hasImage = image != null

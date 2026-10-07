@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -667,8 +668,14 @@ fun WritingScreen(viewModel: TranslationViewModel) {
 
     // --- Nguồn từ vựng: các bộ đề có chữ Hán + danh sách đang nhập ---
     val rawInput = viewModel.rawTextContent.value
-    val decks = remember(studySets, rawInput) {
+    // Danh sách đang luyện tập (đã xáo trộn giống hệt chế độ luyện học) đứng đầu để hai chế độ đồng bộ thứ tự.
+    val practicePairs by viewModel.practicePairs.collectAsState()
+    val practiceRaw = remember(practicePairs) {
+        practicePairs.joinToString("\n") { "${it.vi} = ${it.foreign}" }
+    }
+    val decks = remember(studySets, rawInput, practiceRaw) {
         buildList {
+            if (containsCjk(practiceRaw)) add(Triple(-3L, "Đang luyện tập", practiceRaw))
             if (containsCjk(rawInput)) add(Triple(-1L, "Đang nhập", rawInput))
             studySets.filter { containsCjk(it.rawContent) }.forEach {
                 add(Triple(it.id, it.title.substringBefore(" ("), it.rawContent))
@@ -695,7 +702,17 @@ fun WritingScreen(viewModel: TranslationViewModel) {
     }
     LaunchedEffect(word) { startAtLast = false }
     val blurChars = viewModel.writingFreeMode.value && viewModel.writingBlur.value
+    val autoSpeak = viewModel.writingAutoSpeak.value
+    // Tự đọc: đổi từ -> đọc cả từ; đổi sang chữ khác trong từ -> đọc riêng chữ đó.
+    LaunchedEffect(word, charIndex, autoSpeak) {
+        if (autoSpeak && word.isNotBlank()) {
+            delay(350)
+            val text = if (charIndex == 0) word.filter { isCjk(it) } else chars.getOrNull(charIndex) ?: word
+            if (text.isNotBlank()) viewModel.speakText(text, "zh")
+        }
+    }
     val currentChar = chars.getOrNull(charIndex)
+    val mainScroll = rememberScrollState()
     val wordInfo = remember(word, decks) {
         decks.firstNotNullOfOrNull { d -> parseStudyWords(d.third).firstOrNull { it.hanzi == word } }
     }
@@ -739,7 +756,19 @@ fun WritingScreen(viewModel: TranslationViewModel) {
     LaunchedEffect(guidedComplete) {
         if (guidedComplete) {
             charResults[charIndex] = (100 - board.totalMisses * 7).coerceIn(40, 100)
+            delay(250)
+            mainScroll.animateScrollTo(mainScroll.maxValue, tween(550, easing = FastOutSlowInEasing))
         }
+    }
+    // Chấm điểm xong: tự cuộn mượt xuống khung kết quả; viết lại/đổi chữ thì cuộn về đầu.
+    LaunchedEffect(board.result) {
+        if (board.result != null) {
+            delay(250)
+            mainScroll.animateScrollTo(mainScroll.maxValue, tween(550, easing = FastOutSlowInEasing))
+        }
+    }
+    LaunchedEffect(board) {
+        if (mainScroll.value > 0) mainScroll.animateScrollTo(0, tween(350, easing = FastOutSlowInEasing))
     }
     LaunchedEffect(board.flash) {
         if (board.flash != null) {
@@ -852,7 +881,7 @@ fun WritingScreen(viewModel: TranslationViewModel) {
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(mainScroll)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -901,6 +930,32 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                                 color = colors.onSurface.copy(alpha = 0.6f),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (autoSpeak) colors.primary.copy(alpha = 0.16f) else colors.surfaceVariant.copy(alpha = 0.7f))
+                                .clickable {
+                                    viewModel.writingAutoSpeak.value = !viewModel.writingAutoSpeak.value
+                                    viewModel.saveWritingPrefs()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (autoSpeak) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                                contentDescription = "Tự động phát âm",
+                                tint = if (autoSpeak) colors.primary else colors.onSurface.copy(alpha = 0.6f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = if (autoSpeak) "Tự đọc: BẬT" else "Tự đọc: TẮT",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (autoSpeak) colors.primary else colors.onSurface.copy(alpha = 0.6f)
                             )
                         }
                     }

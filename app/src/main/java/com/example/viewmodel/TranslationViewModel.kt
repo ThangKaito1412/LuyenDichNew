@@ -77,6 +77,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     val writingSpeed = mutableStateOf(1.5f)
     // Làm mờ chữ Hán đang hiển thị khi Viết tự do (chống nhìn lỏm)
     val writingBlur = mutableStateOf(true)
+    // Tự động đọc chữ Hán khi chuyển từ/chữ trong Luyện Viết
+    val writingAutoSpeak = mutableStateOf(true)
     val writingWord = mutableStateOf("")
     private var screenBeforeWriting = AppScreen.Setup
 
@@ -812,6 +814,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         getApplication<Application>().getSharedPreferences("StudyStatePrefs", Context.MODE_PRIVATE).edit()
             .putBoolean("writing_free", writingFreeMode.value)
             .putBoolean("writing_blur", writingBlur.value)
+            .putBoolean("writing_autospeak", writingAutoSpeak.value)
             .putFloat("writing_speed", writingSpeed.value)
             .putString("writing_word", writingWord.value)
             .apply()
@@ -993,6 +996,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         autoSpeed.value = sharedPrefs.getFloat("autoSpeed", 1f).coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)
         writingFreeMode.value = sharedPrefs.getBoolean("writing_free", false)
         writingBlur.value = sharedPrefs.getBoolean("writing_blur", true)
+        writingAutoSpeak.value = sharedPrefs.getBoolean("writing_autospeak", true)
         answerCardHeight.value = sharedPrefs.getFloat("answer_card_height", 220f).coerceIn(150f, 620f)
         writingSpeed.value = sharedPrefs.getFloat("writing_speed", 1.5f).coerceIn(0.5f, 3f)
         writingWord.value = sharedPrefs.getString("writing_word", "") ?: ""
