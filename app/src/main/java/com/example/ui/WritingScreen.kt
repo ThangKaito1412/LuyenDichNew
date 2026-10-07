@@ -105,6 +105,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -688,7 +689,12 @@ fun WritingScreen(viewModel: TranslationViewModel) {
         }
     }
     val chars = remember(word) { word.filter { isCjk(it) }.map { it.toString() }.distinct() }
-    var charIndex by remember(word) { mutableIntStateOf(0) }
+    var startAtLast by remember { mutableStateOf(false) }
+    var charIndex by remember(word) {
+        mutableIntStateOf(if (startAtLast) (chars.size - 1).coerceAtLeast(0) else 0)
+    }
+    LaunchedEffect(word) { startAtLast = false }
+    val blurChars = viewModel.writingFreeMode.value && viewModel.writingBlur.value
     val currentChar = chars.getOrNull(charIndex)
     val wordInfo = remember(word, decks) {
         decks.firstNotNullOfOrNull { d -> parseStudyWords(d.third).firstOrNull { it.hanzi == word } }
@@ -791,23 +797,30 @@ fun WritingScreen(viewModel: TranslationViewModel) {
         charResults[charIndex] = result.score
     }
 
-    fun stepWord(delta: Int) {
-        if (deckWords.isEmpty()) return
-        val idx = deckWords.indexOfFirst { it.hanzi == word }
-        val n = if (idx < 0) (if (delta > 0) 0 else deckWords.lastIndex)
-        else (idx + delta + deckWords.size) % deckWords.size
-        setWord(deckWords[n].hanzi)
-    }
-
+    // Sau: ưu tiên chữ kế tiếp trong cùng từ; hết chữ cuối mới sang từ kế tiếp trong danh sách.
     fun nextChar() {
         if (charIndex < chars.size - 1) {
             charIndex++
-        } else {
-            // Hết chữ trong từ: sang từ kế tiếp trong danh sách
-            val idx = deckWords.indexOfFirst { it.hanzi == word }
-            if (idx >= 0 && idx < deckWords.size - 1) setWord(deckWords[idx + 1].hanzi)
-            else boardKey++
+            return
         }
+        if (deckWords.isEmpty()) {
+            boardKey++
+            return
+        }
+        val idx = deckWords.indexOfFirst { it.hanzi == word }
+        setWord(deckWords[if (idx < 0) 0 else (idx + 1) % deckWords.size].hanzi)
+    }
+
+    // Trước: lùi chữ trong cùng từ; ở chữ đầu thì về chữ cuối của từ trước đó.
+    fun prevChar() {
+        if (charIndex > 0) {
+            charIndex--
+            return
+        }
+        if (deckWords.isEmpty()) return
+        val idx = deckWords.indexOfFirst { it.hanzi == word }
+        startAtLast = true
+        setWord(deckWords[if (idx < 0) deckWords.lastIndex else (idx - 1 + deckWords.size) % deckWords.size].hanzi)
     }
 
     Column(
@@ -855,7 +868,8 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                 ) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
+                            HanziText(
+                                blurred = blurChars,
                                 text = word.ifBlank { "…" },
                                 fontSize = 26.sp,
                                 fontWeight = FontWeight.Bold,
@@ -889,6 +903,27 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                    }
+                    if (freeMode) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(if (blurChars) colors.primary.copy(alpha = 0.16f) else colors.surfaceVariant.copy(alpha = 0.7f))
+                                .clickable {
+                                    viewModel.writingBlur.value = !viewModel.writingBlur.value
+                                    viewModel.saveWritingPrefs()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (blurChars) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (blurChars) "Hiện chữ Hán" else "Làm mờ chữ Hán",
+                                tint = if (blurChars) colors.primary else colors.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Viết tự do", fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -1084,8 +1119,9 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                             contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    c,
+                                HanziText(
+                                    blurred = blurChars,
+                                    text = c,
                                     fontSize = 24.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (selected) colors.onPrimary else colors.onSurface
@@ -1112,8 +1148,8 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
-                    onClick = { stepWord(-1) },
-                    enabled = deckWords.isNotEmpty(),
+                    onClick = { prevChar() },
+                    enabled = deckWords.isNotEmpty() || charIndex > 0,
                     shape = RoundedCornerShape(26.dp),
                     modifier = Modifier.weight(1f).height(52.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
@@ -1139,8 +1175,8 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                     )
                 }
                 Button(
-                    onClick = { stepWord(1) },
-                    enabled = deckWords.isNotEmpty(),
+                    onClick = { nextChar() },
+                    enabled = deckWords.isNotEmpty() || charIndex < chars.size - 1,
                     shape = RoundedCornerShape(26.dp),
                     modifier = Modifier.weight(1f).height(52.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp)
@@ -1193,6 +1229,33 @@ fun WritingScreen(viewModel: TranslationViewModel) {
 // ---------------------------------------------------------------------------------------------
 // Small pieces
 // ---------------------------------------------------------------------------------------------
+
+/** Chữ Hán có thể làm mờ; máy dưới Android 12 không hỗ trợ blur nên che bằng dấu chấm. */
+@Composable
+private fun HanziText(
+    text: String,
+    blurred: Boolean,
+    fontSize: androidx.compose.ui.unit.TextUnit,
+    fontWeight: FontWeight,
+    color: Color,
+    modifier: Modifier = Modifier,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip
+) {
+    if (blurred && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+        Text("●".repeat(text.length.coerceAtLeast(1)), fontSize = fontSize * 0.6f, fontWeight = fontWeight, color = color.copy(alpha = 0.5f), modifier = modifier, maxLines = maxLines, overflow = overflow)
+    } else {
+        Text(
+            text = text,
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            color = color,
+            modifier = if (blurred) modifier.blur(14.dp, androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded) else modifier,
+            maxLines = maxLines,
+            overflow = overflow
+        )
+    }
+}
 
 @Composable
 private fun RoundIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: () -> Unit) {

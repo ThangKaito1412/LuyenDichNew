@@ -1491,6 +1491,11 @@ fun PracticeScreenView(
         }
     }
 
+    // Android 13+: cần quyền thông báo để hiện thông báo "đang tự cuộn" (dịch vụ chạy nền vẫn hoạt động nếu từ chối)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> viewModel.toggleAutoPlay() }
+
     val isSpeechRecognitionActiveState = viewModel.isSpeechRecognitionActive.value
     LaunchedEffect(isSpeechRecognitionActiveState, currentIndex, currentDirection) {
         if (isSpeechRecognitionActiveState) {
@@ -2591,100 +2596,130 @@ fun PracticeScreenView(
                 is FeedbackState.Revealed -> {
                     val imageTerm = cleanKeyword(currentPair.foreign).ifBlank { cleanKeyword(currentPair.vi) }
                     val viTerm = cleanKeyword(currentPair.vi).ifBlank { imageTerm }
+                    // Mỗi lần khung đáp án hiện lại sẽ bốc ngẫu nhiên một ảnh trong top 5 kết quả Bing.
+                    val pick = remember { kotlin.random.Random.nextInt(5) }
                     val image by com.example.ui.rememberRemoteImage(
                         key = imageTerm + "|" + viTerm,
-                        urls = listOf(
-                            "https://tse1.mm.bing.net/th?q=" + java.net.URLEncoder.encode(imageTerm, "UTF-8") + "&w=900&h=520&c=7&rs=1&p=0",
-                            "https://tse2.mm.bing.net/th?q=" + java.net.URLEncoder.encode(viTerm, "UTF-8") + "&w=900&h=520&c=7&rs=1&p=0"
-                        )
+                        queries = listOf(imageTerm, viTerm),
+                        pick = pick
                     )
                     val hasImage = image != null
                     // Khi có ảnh nền: luôn phủ lớp tối + chữ trắng để chữ không bị chìm theo màu ảnh.
                     val fg = if (hasImage) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                     val chipBg = if (hasImage) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Box(modifier = Modifier.fillMaxWidth().heightIn(min = 170.dp)) {
-                            image?.let { bmp ->
-                                androidx.compose.foundation.Image(
-                                    bitmap = bmp,
-                                    contentDescription = "Hình minh họa: $imageTerm",
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                    modifier = Modifier.matchParentSize()
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                listOf(Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.80f))
+                    val answerDensity = LocalDensity.current
+                    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth().heightIn(min = viewModel.answerCardHeight.value.dp)) {
+                                image?.let { bmp ->
+                                    androidx.compose.foundation.Image(
+                                        bitmap = bmp,
+                                        contentDescription = "Hình minh họa: $imageTerm",
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.matchParentSize()
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .matchParentSize()
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    listOf(Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.80f))
+                                                )
                                             )
-                                        )
-                                )
-                            }
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    text = "💡  Đáp án gợi ý:",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = fg.copy(alpha = if (hasImage) 0.85f else 1f)
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                    )
+                                }
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        text = "💡  Đáp án gợi ý:",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = fg.copy(alpha = if (hasImage) 0.85f else 1f)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
 
-                                Text(
-                                    text = state.correctAnswer,
-                                    fontSize = 19.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = fg,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                    Text(
+                                        text = state.correctAnswer,
+                                        fontSize = 19.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = fg,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
 
-                                Spacer(modifier = Modifier.height(12.dp))
+                                    Spacer(modifier = Modifier.height(12.dp))
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(CircleShape)
-                                            .background(chipBg)
-                                            .clickable { viewModel.speakAnswer() },
-                                        contentAlignment = Alignment.Center
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.VolumeUp,
-                                            contentDescription = "Nghe",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = fg
-                                        )
-                                    }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(chipBg)
+                                                .clickable { viewModel.speakAnswer() },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VolumeUp,
+                                                contentDescription = "Nghe",
+                                                modifier = Modifier.size(24.dp),
+                                                tint = fg
+                                            )
+                                        }
 
-                                    Spacer(modifier = Modifier.width(12.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
 
-                                    Box(
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isLooping) chipBg.copy(alpha = 0.35f) else chipBg)
-                                            .clickable { viewModel.toggleAudioLoop() },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = "Lặp",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = if (isLooping) Color(0xFFFF6B6B) else fg
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isLooping) chipBg.copy(alpha = 0.35f) else chipBg)
+                                                .clickable { viewModel.toggleAudioLoop() },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Lặp",
+                                                modifier = Modifier.size(24.dp),
+                                                tint = if (isLooping) Color(0xFFFF6B6B) else fg
+                                            )
+                                        }
                                     }
                                 }
                             }
+                        }
+
+                        // Thanh kéo: kéo xuống để phóng to khung/hình nền, kéo lên để thu nhỏ
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(32.dp)
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures(
+                                        onVerticalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            val deltaDp = with(answerDensity) { dragAmount.toDp() }
+                                            viewModel.updateAnswerCardHeight(viewModel.answerCardHeight.value + deltaDp.value)
+                                        },
+                                        onDragEnd = { viewModel.saveAnswerCardHeight() },
+                                        onDragCancel = { viewModel.saveAnswerCardHeight() }
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(52.dp)
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
+                            )
                         }
                     }
                 }
@@ -2720,26 +2755,25 @@ fun PracticeScreenView(
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp, horizontal = 2.dp),
-                modifier = Modifier.weight(1.2f).height(42.dp)
+                modifier = Modifier.weight(1.6f).height(42.dp)
             ) {
                 Icon(Icons.Default.Check, contentDescription = "Kiểm tra", modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(2.dp))
                 Text("Kiểm tra", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
 
-            Button(
-                onClick = { viewModel.showAnswerToggle() },
-                shape = RoundedCornerShape(24.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.primary),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp, horizontal = 2.dp),
-                modifier = Modifier.weight(1.1f).height(42.dp)
-            ) {
-                Text("Xem đáp án", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            }
-
             // NEW: "Tự cuộn" (Auto-play control button) - Located in between "Xem đáp án" and "Bỏ qua"
             Button(
-                onClick = { viewModel.toggleAutoPlay() },
+                onClick = {
+                    val needsNotifPermission = !isAutoPlaying &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    if (needsNotifPermission) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.toggleAutoPlay()
+                    }
+                },
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isAutoPlaying) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -2755,16 +2789,6 @@ fun PracticeScreenView(
                 )
                 Spacer(modifier = Modifier.width(3.dp))
                 Text(if (isAutoPlaying) "Dừng Auto" else "Tự cuộn", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Button(
-                onClick = { viewModel.nextItem() },
-                shape = RoundedCornerShape(24.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp, horizontal = 2.dp),
-                modifier = Modifier.weight(0.9f).height(42.dp)
-            ) {
-                Text("Bỏ qua", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

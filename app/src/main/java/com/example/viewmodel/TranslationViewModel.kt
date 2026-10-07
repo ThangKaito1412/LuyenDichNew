@@ -75,6 +75,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     // Writing practice (Tập viết chữ Hán)
     val writingFreeMode = mutableStateOf(false)
     val writingSpeed = mutableStateOf(1.5f)
+    // Làm mờ chữ Hán đang hiển thị khi Viết tự do (chống nhìn lỏm)
+    val writingBlur = mutableStateOf(true)
     val writingWord = mutableStateOf("")
     private var screenBeforeWriting = AppScreen.Setup
 
@@ -200,6 +202,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     val userAnswerInput = mutableStateOf("")
     val cardHeightState = mutableStateOf(240f)
+    // Chiều cao tối thiểu (dp) của khung đáp án gợi ý có ảnh nền, chỉnh bằng thanh kéo
+    val answerCardHeight = mutableStateOf(220f)
 
     private val _feedback = MutableStateFlow<FeedbackState>(FeedbackState.Idle)
     val feedback: StateFlow<FeedbackState> = _feedback.asStateFlow()
@@ -678,12 +682,14 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
             stopAudioLoop()
             stopPromptAudioLoop()
             _isAutoPlaying.value = true
+            setAutoPlayServiceRunning(true)
             startAutoPlayLoop()
         }
     }
 
     fun stopAutoPlay() {
         _isAutoPlaying.value = false
+        setAutoPlayServiceRunning(false)
         autoPlayJob?.cancel()
         autoPlayJob = null
         try {
@@ -744,6 +750,30 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     private fun scaledPause(baseMs: Long): Long =
         (baseMs / autoSpeed.value.coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)).toLong()
 
+    fun updateAnswerCardHeight(value: Float) {
+        answerCardHeight.value = value.coerceIn(150f, 620f)
+    }
+
+    fun saveAnswerCardHeight() {
+        getApplication<Application>().getSharedPreferences("StudyStatePrefs", Context.MODE_PRIVATE)
+            .edit().putFloat("answer_card_height", answerCardHeight.value).apply()
+    }
+
+    private fun setAutoPlayServiceRunning(running: Boolean) {
+        val app = getApplication<Application>()
+        val intent = Intent(app, com.example.AutoPlayService::class.java)
+        try {
+            if (running) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) app.startForegroundService(intent)
+                else app.startService(intent)
+            } else {
+                app.stopService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("TranslationViewModel", "AutoPlayService toggle failed", e)
+        }
+    }
+
     fun updateAutoSpeed(value: Float) {
         autoSpeed.value = (Math.round(value * 10f) / 10f).coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)
         getApplication<Application>().getSharedPreferences("StudyStatePrefs", Context.MODE_PRIVATE)
@@ -781,6 +811,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
     fun saveWritingPrefs() {
         getApplication<Application>().getSharedPreferences("StudyStatePrefs", Context.MODE_PRIVATE).edit()
             .putBoolean("writing_free", writingFreeMode.value)
+            .putBoolean("writing_blur", writingBlur.value)
             .putFloat("writing_speed", writingSpeed.value)
             .putString("writing_word", writingWord.value)
             .apply()
@@ -961,6 +992,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         autoRepeatCount.value = sharedPrefs.getInt("autoRepeatCount", 2).coerceIn(MIN_AUTO_REPEAT, MAX_AUTO_REPEAT)
         autoSpeed.value = sharedPrefs.getFloat("autoSpeed", 1f).coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)
         writingFreeMode.value = sharedPrefs.getBoolean("writing_free", false)
+        writingBlur.value = sharedPrefs.getBoolean("writing_blur", true)
+        answerCardHeight.value = sharedPrefs.getFloat("answer_card_height", 220f).coerceIn(150f, 620f)
         writingSpeed.value = sharedPrefs.getFloat("writing_speed", 1.5f).coerceIn(0.5f, 3f)
         writingWord.value = sharedPrefs.getString("writing_word", "") ?: ""
 

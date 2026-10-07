@@ -192,37 +192,87 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** Tải ảnh minh họa từ link (có cache bộ nhớ). Thử lần lượt các URL cho tới khi có ảnh. */
+/** Một kết quả ảnh từ tìm kiếm Bing: ảnh thu nhỏ (nhanh) và ảnh gốc (nét hơn). */
+data class ImageCandidate(val thumb: String, val full: String)
+
+/** Tải ảnh minh họa từ Bing Images (top kết quả đầu, chọn ngẫu nhiên) kèm cache bộ nhớ. */
 object RemoteImages {
-    private val cache = object : android.util.LruCache<String, android.graphics.Bitmap>(24) {}
+    private const val UA =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+    private const val TOP_N = 5
+
+    private val cache = object : android.util.LruCache<String, android.graphics.Bitmap>(16) {}
+    private val searchCache = java.util.concurrent.ConcurrentHashMap<String, List<ImageCandidate>>()
+    private val lastPick = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val client by lazy {
         okhttp3.OkHttpClient.Builder()
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
-    suspend fun load(urls: List<String>): android.graphics.Bitmap? =
+    private fun fetch(url: String): ByteArray? = try {
+        val request = okhttp3.Request.Builder().url(url).header("User-Agent", UA).build()
+        client.newCall(request).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+    } catch (e: Exception) {
+        android.util.Log.w("RemoteImages", "fetch failed: ${e.message}")
+        null
+    }
+
+    private fun decode(bytes: ByteArray): android.graphics.Bitmap? {
+        if (bytes.size > 12_000_000) return null
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        return if (bmp != null && bmp.width > 60 && bmp.height > 60) bmp else null
+    }
+
+    private fun search(query: String): List<ImageCandidate> {
+        searchCache[query]?.let { return it }
+        val url = "https://www.bing.com/images/async?q=" + java.net.URLEncoder.encode(query, "UTF-8") +
+            "&first=0&count=20&mmasync=1&adlt=moderate"
+        val html = fetch(url)?.toString(Charsets.UTF_8) ?: return emptyList()
+        fun grab(key: String) = Regex(key + "&quot;:&quot;(.+?)&quot;")
+            .findAll(html).map { it.groupValues[1].replace("&amp;", "&") }
+            .filter { it.startsWith("http") }.toList()
+        val thumbs = grab("turl")
+        val fulls = grab("murl")
+        val n = minOf(thumbs.size, fulls.size, TOP_N)
+        val result = (0 until n).map { ImageCandidate(thumbs[it], fulls[it]) }
+        if (result.isNotEmpty()) searchCache[query] = result
+        return result
+    }
+
+    private fun loadUrl(url: String): android.graphics.Bitmap? {
+        cache.get(url)?.let { return it }
+        val bmp = fetch(url)?.let { decode(it) } ?: return null
+        cache.put(url, bmp)
+        return bmp
+    }
+
+    /**
+     * Lấy ảnh ở vị trí [pick] (0..4) trong top kết quả của từ khóa đầu tiên có kết quả.
+     * Tránh trùng ảnh vừa hiện trước đó của cùng từ khóa; nếu ảnh lỗi thì thử ảnh kế tiếp.
+     */
+    suspend fun loadRandom(queries: List<String>, pick: Int): android.graphics.Bitmap? =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            for (url in urls) {
-                cache.get(url)?.let { return@withContext it }
-                try {
-                    val request = okhttp3.Request.Builder()
-                        .url(url)
-                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36")
-                        .build()
-                    client.newCall(request).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val bytes = response.body?.bytes()
-                            val bmp = bytes?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
-                            if (bmp != null && bmp.width > 40 && bmp.height > 40) {
-                                cache.put(url, bmp)
-                                return@withContext bmp
-                            }
-                        }
+            for (q in queries.filter { it.isNotBlank() }) {
+                val candidates = search(q)
+                if (candidates.isEmpty()) continue
+                var start = pick.mod(candidates.size)
+                if (candidates.size > 1 && lastPick[q] == start) start = (start + 1) % candidates.size
+                for (offset in candidates.indices) {
+                    val i = (start + offset) % candidates.size
+                    val c = candidates[i]
+                    val bmp = loadUrl(c.thumb + "&w=1000&h=620&c=7&rs=1") ?: loadUrl(c.thumb) ?: loadUrl(c.full)
+                    if (bmp != null) {
+                        lastPick[q] = i
+                        return@withContext bmp
                     }
-                } catch (e: Exception) {
-                    android.util.Log.w("RemoteImages", "load failed: ${e.message}")
                 }
             }
             null
@@ -230,7 +280,7 @@ object RemoteImages {
 }
 
 @Composable
-fun rememberRemoteImage(key: String, urls: List<String>): androidx.compose.runtime.State<androidx.compose.ui.graphics.ImageBitmap?> =
-    androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, key) {
-        value = RemoteImages.load(urls)?.asImageBitmap()
+fun rememberRemoteImage(key: String, queries: List<String>, pick: Int): androidx.compose.runtime.State<androidx.compose.ui.graphics.ImageBitmap?> =
+    androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, key, pick) {
+        value = RemoteImages.loadRandom(queries, pick)?.asImageBitmap()
     }
