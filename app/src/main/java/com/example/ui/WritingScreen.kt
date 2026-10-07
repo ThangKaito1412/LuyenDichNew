@@ -17,7 +17,9 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
@@ -42,6 +44,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,6 +57,10 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay
@@ -121,6 +129,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.FreeResult
 import com.example.data.HanziChar
 import com.example.data.HanziRepository
+import com.example.data.StarredPair
 import com.example.data.StudyWord
 import com.example.data.containsCjk
 import com.example.data.isCjk
@@ -160,6 +169,11 @@ private sealed interface HanziLoad {
 }
 
 private const val BRUSH_WIDTH = 36f
+
+/** Màu luân phiên cho từng nét: san hô / xanh nhạt. */
+private val StrokePalette = listOf(Color(0xFFF08080), Color(0xFFA9CBEA))
+
+private fun strokeColor(index: Int): Color = StrokePalette[index % StrokePalette.size]
 
 /** Làm mượt đường vẽ bằng các đoạn bậc hai đi qua trung điểm. */
 private fun smoothPath(points: List<Offset>): Path {
@@ -309,17 +323,17 @@ private fun HanziBoard(
 
                 if (!freeMode) {
                     for (i in 0 until min(board.doneCount, data.strokeCount)) {
-                        drawPath(data.strokes[i], doneColor)
+                        drawPath(data.strokes[i], strokeColor(i))
                     }
                     // Gợi ý nét kế tiếp sau 2 lần viết sai
                     if (board.misses >= 2 && board.doneCount < data.strokeCount) {
-                        drawPath(data.strokes[board.doneCount], doneColor.copy(alpha = pulseAlpha?.value ?: 0.4f))
+                        drawPath(data.strokes[board.doneCount], strokeColor(board.doneCount).copy(alpha = pulseAlpha?.value ?: 0.4f))
                     }
                 }
             }
 
-            board.userStrokes.forEach { stroke ->
-                val c = if (stroke.score >= 0f) scoreColor(stroke.score) else inkColor
+            board.userStrokes.forEachIndexed { index, stroke ->
+                val c = if (stroke.score >= 0f) scoreColor(stroke.score) else strokeColor(index)
                 drawPath(stroke.path, c, style = Stroke(width = BRUSH_WIDTH, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
             board.flash?.let {
@@ -327,7 +341,8 @@ private fun HanziBoard(
             }
             if (board.live.isNotEmpty()) {
                 drawPath(
-                    smoothPath(board.live.toList()), inkColor,
+                    smoothPath(board.live.toList()),
+                    strokeColor(if (freeMode) board.userStrokes.size else board.doneCount),
                     style = Stroke(width = BRUSH_WIDTH, cap = StrokeCap.Round, join = StrokeJoin.Round)
                 )
             }
@@ -408,7 +423,7 @@ private fun DemoSheet(
                         val drawing = f < 1f
                         drawRevealedStroke(
                             data.strokes[i], data.medians[i], f,
-                            if (drawing) activeColor else doneColor
+                            strokeColor(i)
                         )
                     }
                 }
@@ -451,26 +466,40 @@ private fun DemoSheet(
 // Word picker sheet
 // ---------------------------------------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun WordPickerSheet(
     deckTitles: List<Pair<Long, String>>,
     selectedDeckId: Long,
     onDeckSelected: (Long) -> Unit,
     words: List<StudyWord>,
-    initialFilter: String,
+    currentWord: String,
+    starred: List<StarredPair>,
+    onToggleStar: (StudyWord) -> Unit,
+    onSetAllStars: (Boolean) -> Unit,
+    onCopy: (StudyWord) -> Unit,
     onPick: (StudyWord) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var filter by remember { mutableStateOf(initialFilter) }
+    var filter by remember { mutableStateOf("") }
     val colors = MaterialTheme.colorScheme
+    val gold = Color(0xFFFFD700)
+
+    fun key(vi: String, foreign: String) = vi.trim().lowercase() + "\u0000" + foreign.trim().lowercase()
+    val starKeys = remember(starred) { starred.map { key(it.vi, it.foreign) }.toSet() }
+    fun isStarred(w: StudyWord) = key(w.rawVi, w.rawForeign) in starKeys
+    val allStarred = words.isNotEmpty() && words.all { isStarred(it) }
+
     val shown = remember(words, filter) {
         val f = filter.trim().lowercase()
         if (f.isEmpty()) words else words.filter {
             it.hanzi.contains(f) || it.meaning.lowercase().contains(f) || it.pinyin.lowercase().contains(f)
         }
     }
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = words.indexOfFirst { it.hanzi == currentWord }.coerceAtLeast(0)
+    )
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -500,19 +529,43 @@ private fun WordPickerSheet(
             OutlinedTextField(
                 value = filter,
                 onValueChange = { filter = it },
-                placeholder = { Text("Tìm theo chữ Hán, pinyin hoặc nghĩa...", fontSize = 13.sp) },
+                placeholder = { Text("Lọc theo chữ Hán, pinyin hoặc nghĩa...", fontSize = 13.sp) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "${shown.size} từ",
-                fontSize = 11.sp,
-                color = colors.onSurface.copy(alpha = 0.5f)
-            )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${shown.size} từ  •  Chạm 2 lần để sao chép chữ Hán",
+                    fontSize = 11.sp,
+                    color = colors.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = { onSetAllStars(!allStarred) },
+                    enabled = words.isNotEmpty(),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = if (allStarred) Icons.Default.StarBorder else Icons.Default.Star,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (allStarred) Color.Gray else gold
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (allStarred) "Hủy chọn tất cả" else "Chọn tất cả ⭐",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
 
             if (shown.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
@@ -525,35 +578,68 @@ private fun WordPickerSheet(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    items(shown) { w ->
+                    itemsIndexed(shown) { idx, w ->
+                        val isCurrent = w.hanzi == currentWord
+                        val hasStar = isStarred(w)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(colors.surfaceVariant.copy(alpha = 0.45f))
-                                .clickable { onPick(w) }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (isCurrent) colors.primary.copy(alpha = 0.14f)
+                                    else colors.surfaceVariant.copy(alpha = 0.45f)
+                                )
+                                .combinedClickable(
+                                    onClick = { onPick(w) },
+                                    onDoubleClick = { onCopy(w) }
+                                )
+                                .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = w.hanzi,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.primary,
-                                modifier = Modifier.widthIn(min = 56.dp, max = 140.dp),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                if (w.pinyin.isNotEmpty()) {
-                                    Text(w.pinyin, fontSize = 12.sp, color = colors.onSurface.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    text = "Từ ${idx + 1}" + if (isCurrent) " (Đang luyện)" else "",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCurrent) colors.primary else Color.Gray
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = w.hanzi,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.primary,
+                                        modifier = Modifier.widthIn(max = 150.dp),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        if (w.pinyin.isNotEmpty()) {
+                                            Text(w.pinyin, fontSize = 12.sp, color = colors.onSurface.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        Text(w.meaning, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
-                                Text(w.meaning, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .clickable { onToggleStar(w) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (hasStar) Icons.Default.Star else Icons.Default.StarBorder,
+                                    contentDescription = "Gắn sao",
+                                    tint = if (hasStar) gold else Color.Gray,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                         }
                     }
@@ -571,7 +657,7 @@ private fun WordPickerSheet(
 @Composable
 fun WritingScreen(viewModel: TranslationViewModel) {
     val context = LocalContext.current
-    val focusManager = LocalFocusManager.current
+    val starredPairs by viewModel.allStarredPairs.collectAsState()
     val colors = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val studySets by viewModel.allStudySets.collectAsState()
@@ -636,8 +722,6 @@ fun WritingScreen(viewModel: TranslationViewModel) {
 
     var showDemo by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
-    var pickerFilter by remember { mutableStateOf("") }
-    var searchInput by remember { mutableStateOf("") }
 
     fun setWord(newWord: String) {
         word = newWord
@@ -707,6 +791,14 @@ fun WritingScreen(viewModel: TranslationViewModel) {
         charResults[charIndex] = result.score
     }
 
+    fun stepWord(delta: Int) {
+        if (deckWords.isEmpty()) return
+        val idx = deckWords.indexOfFirst { it.hanzi == word }
+        val n = if (idx < 0) (if (delta > 0) 0 else deckWords.lastIndex)
+        else (idx + delta + deckWords.size) % deckWords.size
+        setWord(deckWords[n].hanzi)
+    }
+
     fun nextChar() {
         if (charIndex < chars.size - 1) {
             charIndex++
@@ -739,7 +831,6 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                 fontSize = 18.sp
             )
             RoundIconButton(Icons.Default.ViewList, "Danh sách từ") {
-                pickerFilter = ""
                 showPicker = true
             }
         }
@@ -1014,47 +1105,48 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = searchInput,
-                    onValueChange = { searchInput = it },
-                    placeholder = { Text("Nhập chữ Hán hoặc tìm trong danh sách", fontSize = 13.sp) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        focusManager.clearFocus()
-                        val text = searchInput.trim()
-                        if (containsCjk(text)) {
-                            setWord(text.filter { isCjk(it) })
-                            searchInput = ""
-                        } else if (text.isNotEmpty()) {
-                            pickerFilter = text
-                            showPicker = true
-                        }
-                    })
-                )
-                Spacer(Modifier.width(10.dp))
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary)
-                        .clickable {
-                            focusManager.clearFocus()
-                            val text = searchInput.trim()
-                            if (containsCjk(text)) {
-                                setWord(text.filter { isCjk(it) })
-                                searchInput = ""
-                            } else {
-                                pickerFilter = text
-                                showPicker = true
-                            }
-                        },
-                    contentAlignment = Alignment.Center
+            val position = deckWords.indexOfFirst { it.hanzi == word }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = { stepWord(-1) },
+                    enabled = deckWords.isNotEmpty(),
+                    shape = RoundedCornerShape(26.dp),
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
-                    Icon(Icons.Default.Search, "Tìm", tint = colors.onPrimary)
+                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = null)
+                    Text("Trước", fontWeight = FontWeight.SemiBold)
+                }
+                Button(
+                    onClick = { showPicker = true },
+                    shape = RoundedCornerShape(26.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.primaryContainer,
+                        contentColor = colors.onPrimaryContainer
+                    ),
+                    modifier = Modifier.weight(1.15f).height(52.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(Icons.Default.ViewList, contentDescription = "Danh sách", modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (position >= 0) "${position + 1}/${deckWords.size}" else "Danh sách",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Button(
+                    onClick = { stepWord(1) },
+                    enabled = deckWords.isNotEmpty(),
+                    shape = RoundedCornerShape(26.dp),
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("Sau", fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
                 }
             }
         }
@@ -1078,7 +1170,17 @@ fun WritingScreen(viewModel: TranslationViewModel) {
             selectedDeckId = selectedDeckId,
             onDeckSelected = { selectedDeckId = it },
             words = deckWords,
-            initialFilter = pickerFilter,
+            currentWord = word,
+            starred = starredPairs,
+            onToggleStar = { viewModel.toggleStar(it.rawVi, it.rawForeign, "zh") },
+            onSetAllStars = { star ->
+                viewModel.setStarForPairs(deckWords.map { it.rawVi to it.rawForeign }, "zh", star)
+            },
+            onCopy = {
+                val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("hanzi", it.hanzi))
+                android.widget.Toast.makeText(context, "Đã sao chép: ${it.hanzi}", android.widget.Toast.LENGTH_SHORT).show()
+            },
             onPick = {
                 setWord(it.hanzi)
                 showPicker = false

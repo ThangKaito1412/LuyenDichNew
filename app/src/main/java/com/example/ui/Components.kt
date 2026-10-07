@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -63,7 +65,9 @@ fun Modifier.bounceClick(enabled: Boolean = true, onClick: () -> Unit): Modifier
 fun AutoRepeatControl(
     value: Int,
     onChange: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    speed: Float? = null,
+    onSpeedChange: ((Float) -> Unit)? = null
 ) {
     val colors = MaterialTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -117,6 +121,35 @@ fun AutoRepeatControl(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
         )
+
+        if (speed != null && onSpeedChange != null) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Tốc độ tự cuộn", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "${"%.1f".format(speed)}x",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = colors.primary
+                    )
+                }
+                Slider(
+                    value = speed,
+                    onValueChange = onSpeedChange,
+                    valueRange = 0.5f..2.0f,
+                    steps = 14
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Chậm", fontSize = 10.5.sp, color = colors.onSurface.copy(alpha = 0.5f))
+                    Text("Bình thường", fontSize = 10.5.sp, color = colors.onSurface.copy(alpha = 0.5f))
+                    Text("Nhanh", fontSize = 10.5.sp, color = colors.onSurface.copy(alpha = 0.5f))
+                }
+            }
+        }
     }
 }
 
@@ -158,3 +191,46 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.primary
     )
 }
+
+/** Tải ảnh minh họa từ link (có cache bộ nhớ). Thử lần lượt các URL cho tới khi có ảnh. */
+object RemoteImages {
+    private val cache = object : android.util.LruCache<String, android.graphics.Bitmap>(24) {}
+    private val client by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    suspend fun load(urls: List<String>): android.graphics.Bitmap? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            for (url in urls) {
+                cache.get(url)?.let { return@withContext it }
+                try {
+                    val request = okhttp3.Request.Builder()
+                        .url(url)
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0 Mobile Safari/537.36")
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val bytes = response.body?.bytes()
+                            val bmp = bytes?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+                            if (bmp != null && bmp.width > 40 && bmp.height > 40) {
+                                cache.put(url, bmp)
+                                return@withContext bmp
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("RemoteImages", "load failed: ${e.message}")
+                }
+            }
+            null
+        }
+}
+
+@Composable
+fun rememberRemoteImage(key: String, urls: List<String>): androidx.compose.runtime.State<androidx.compose.ui.graphics.ImageBitmap?> =
+    androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, key) {
+        value = RemoteImages.load(urls)?.asImageBitmap()
+    }

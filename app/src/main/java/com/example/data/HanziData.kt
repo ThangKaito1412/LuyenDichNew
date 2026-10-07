@@ -33,7 +33,10 @@ class HanziChar(
 data class StudyWord(
     val hanzi: String,
     val pinyin: String,
-    val meaning: String
+    val meaning: String,
+    /** Nguyên văn hai vế trong bộ đề, dùng để khớp trạng thái gắn sao. */
+    val rawVi: String = meaning,
+    val rawForeign: String = hanzi
 )
 
 fun isCjk(c: Char): Boolean = c.code in 0x4E00..0x9FFF || c.code in 0x3400..0x4DBF
@@ -60,7 +63,7 @@ fun parseStudyWords(rawContent: String): List<StudyWord> {
             hanSide.substring(parenIdx).trim('(', ')', '（', '）', '[', ']', '【', '】', ' ')
         } else ""
         if (!containsCjk(hanzi)) return@mapNotNull null
-        StudyWord(hanzi = hanzi, pinyin = pinyin, meaning = viSide)
+        StudyWord(hanzi = hanzi, pinyin = pinyin, meaning = viSide, rawVi = viSide, rawForeign = hanSide)
     }.distinctBy { it.hanzi }
 }
 

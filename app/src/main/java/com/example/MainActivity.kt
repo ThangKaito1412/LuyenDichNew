@@ -1429,7 +1429,9 @@ fun SetupScreenView(
                     Text("5. Tự cuộn - số lần lặp mỗi câu:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     AutoRepeatControl(
                         value = viewModel.autoRepeatCount.value,
-                        onChange = { viewModel.updateAutoRepeatCount(it) }
+                        onChange = { viewModel.updateAutoRepeatCount(it) },
+                        speed = viewModel.autoSpeed.value,
+                        onSpeedChange = { viewModel.updateAutoSpeed(it) }
                     )
                 }
             },
@@ -1470,6 +1472,7 @@ fun PracticeScreenView(
     var isSearchMenuExpanded by remember { mutableStateOf(false) }
     var showWebViewUrl by remember { mutableStateOf<String?>(null) }
     var showAutoRepeatDialog by remember { mutableStateOf(false) }
+    var hideInput by remember { mutableStateOf(false) }
     var showParagraphDialog by remember { mutableStateOf(false) }
     var paragraphKeywords by remember { mutableStateOf("") }
     BackHandler { viewModel.backToSetup() }
@@ -2033,14 +2036,17 @@ fun PracticeScreenView(
                                         }
                                         
                                         LookupChip(
-                                            label = "🎨 Tạo ảnh",
+                                            label = "✍️ Tập viết",
                                             onClick = {
-                                                val rawPrompt = "Tạo một bức ảnh minh họa với ai nanobana2 là ý nghĩa của từ/cụm từ \"$cleanedSearchTerm\" theo cách dễ ghi nhớ nhất. Bối cảnh bức ảnh phải kể một câu chuyện thực tế hoặc thể hiện một tình huống giao tiếp. Hãy tạo neo liên tưởng đầy đủ cácMùi hương; Cảm xúc mạnh mẽ; Âm thanh đang diễn ra; và Tình huống đặc biệt để người dùng dễ hình dung, dễ nhớ nhất.. có tiếng trung pinyin đồng thời bản dịch phải là tiếng Việt. hình ảnh theo style chân thật đời sống khi vào phải tạo thẳng ảnh không chat gì thêm."
-                                                val url = "https://www.google.com/search?q=" + java.net.URLEncoder.encode(rawPrompt, "UTF-8")
-                                                showWebViewUrl = url
+                                                val han = cleanKeyword(activePair.foreign).filter { isCjk(it) }
+                                                if (han.isNotEmpty()) {
+                                                    viewModel.openWriting(han)
+                                                } else {
+                                                    Toast.makeText(context, "Câu này không có chữ Hán để luyện viết", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         )
-                                        
+
                                         LookupChip(
                                             label = "🔍 Chi tiết",
                                             onClick = {
@@ -2098,16 +2104,14 @@ fun PracticeScreenView(
                                         )
 
                                         LookupChip(
-                                            label = "✍️ Tập viết",
+                                            label = "🎨 Tạo ảnh",
                                             onClick = {
-                                                val han = cleanKeyword(activePair.foreign).filter { isCjk(it) }
-                                                if (han.isNotEmpty()) {
-                                                    viewModel.openWriting(han)
-                                                } else {
-                                                    Toast.makeText(context, "Câu này không có chữ Hán để luyện viết", Toast.LENGTH_SHORT).show()
-                                                }
+                                                val rawPrompt = "Tạo một bức ảnh minh họa với ai nanobana2 là ý nghĩa của từ/cụm từ \"$cleanedSearchTerm\" theo cách dễ ghi nhớ nhất. Bối cảnh bức ảnh phải kể một câu chuyện thực tế hoặc thể hiện một tình huống giao tiếp. Hãy tạo neo liên tưởng đầy đủ cácMùi hương; Cảm xúc mạnh mẽ; Âm thanh đang diễn ra; và Tình huống đặc biệt để người dùng dễ hình dung, dễ nhớ nhất.. có tiếng trung pinyin đồng thời bản dịch phải là tiếng Việt. hình ảnh theo style chân thật đời sống khi vào phải tạo thẳng ảnh không chat gì thêm."
+                                                val url = "https://www.google.com/search?q=" + java.net.URLEncoder.encode(rawPrompt, "UTF-8")
+                                                showWebViewUrl = url
                                             }
                                         )
+                                        
                                     }
                                 }
                             }
@@ -2116,6 +2120,7 @@ fun PracticeScreenView(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
+                    if (!hideInput) {
                     val cardHeightDp = viewModel.cardHeightState.value.dp
 
                     // Text answer typing Area (Your Translation block - spacious, draggable and non-overlapping!)
@@ -2133,13 +2138,38 @@ fun PracticeScreenView(
                                 .fillMaxSize()
                                 .padding(16.dp)
                         ) {
-                            Text(
-                                text = "BẢN DỊCH CỦA BẠN",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 2.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "BẢN DỊCH CỦA BẠN",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 2.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                        .clickable {
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus()
+                                            hideInput = true
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowUp,
+                                        contentDescription = "Ẩn khung bản dịch",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                             
                             Spacer(modifier = Modifier.height(6.dp))
 
@@ -2350,6 +2380,35 @@ fun PracticeScreenView(
                             }
                         }
                     }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                .clickable { hideInput = false }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "KHUNG BẢN DỊCH ĐANG ẨN",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.5.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Hiện", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Hiện khung bản dịch",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2530,70 +2589,100 @@ fun PracticeScreenView(
                     }
                 }
                 is FeedbackState.Revealed -> {
+                    val imageTerm = cleanKeyword(currentPair.foreign).ifBlank { cleanKeyword(currentPair.vi) }
+                    val viTerm = cleanKeyword(currentPair.vi).ifBlank { imageTerm }
+                    val image by com.example.ui.rememberRemoteImage(
+                        key = imageTerm + "|" + viTerm,
+                        urls = listOf(
+                            "https://tse1.mm.bing.net/th?q=" + java.net.URLEncoder.encode(imageTerm, "UTF-8") + "&w=900&h=520&c=7&rs=1&p=0",
+                            "https://tse2.mm.bing.net/th?q=" + java.net.URLEncoder.encode(viTerm, "UTF-8") + "&w=900&h=520&c=7&rs=1&p=0"
+                        )
+                    )
+                    val hasImage = image != null
+                    // Khi có ảnh nền: luôn phủ lớp tối + chữ trắng để chữ không bị chìm theo màu ảnh.
+                    val fg = if (hasImage) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                    val chipBg = if (hasImage) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(24.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "💡  Đáp án gợi ý:",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = state.correctAnswer,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Speak Answer item (Upgraded to 48.dp perfect touch target size compliant)
+                        Box(modifier = Modifier.fillMaxWidth().heightIn(min = 170.dp)) {
+                            image?.let { bmp ->
+                                androidx.compose.foundation.Image(
+                                    bitmap = bmp,
+                                    contentDescription = "Hình minh họa: $imageTerm",
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.matchParentSize()
+                                )
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f))
-                                        .clickable { viewModel.speakAnswer() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.VolumeUp, 
-                                        contentDescription = "Nghe", 
-                                        modifier = Modifier.size(24.dp), 
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                                        .matchParentSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.80f))
+                                            )
+                                        )
+                                )
+                            }
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "💡  Đáp án gợi ý:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = fg.copy(alpha = if (hasImage) 0.85f else 1f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
 
-                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = state.correctAnswer,
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = fg,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
 
-                                // Loop Audio Speak answer (Upgraded to 48.dp perfect touch target size compliant)
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isLooping) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.16f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f))
-                                        .clickable { viewModel.toggleAudioLoop() },
-                                    contentAlignment = Alignment.Center
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Lặp",
-                                        modifier = Modifier.size(24.dp),
-                                        tint = if (isLooping) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(chipBg)
+                                            .clickable { viewModel.speakAnswer() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.VolumeUp,
+                                            contentDescription = "Nghe",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = fg
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isLooping) chipBg.copy(alpha = 0.35f) else chipBg)
+                                            .clickable { viewModel.toggleAudioLoop() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Lặp",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = if (isLooping) Color(0xFFFF6B6B) else fg
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2688,7 +2777,9 @@ fun PracticeScreenView(
             text = {
                 AutoRepeatControl(
                     value = viewModel.autoRepeatCount.value,
-                    onChange = { viewModel.updateAutoRepeatCount(it) }
+                    onChange = { viewModel.updateAutoRepeatCount(it) },
+                    speed = viewModel.autoSpeed.value,
+                    onSpeedChange = { viewModel.updateAutoSpeed(it) }
                 )
             },
             confirmButton = {
@@ -2728,7 +2819,7 @@ fun PracticeScreenView(
                     OutlinedTextField(
                         value = paragraphKeywords,
                         onValueChange = { paragraphKeywords = it },
-                        label = { Text("Từ khóa tiếng Việt (cách nhau bằng dấu phẩy)", fontSize = 12.sp) },
+                        label = { Text("Từ khóa (tiếng Việt hoặc chữ Hán, cách nhau bằng dấu phẩy)", fontSize = 12.sp) },
                         minLines = 3,
                         maxLines = 6,
                         shape = RoundedCornerShape(16.dp),
@@ -3005,15 +3096,21 @@ fun mergeKeywords(existing: String, extra: List<String>): String =
         .joinToString(", ")
 
 fun buildParagraphPrompt(input: String): String =
-    "Sử dụng các từ vựng tiếng Việt sau: \"$input\", hãy: " +
+    "Sử dụng các từ vựng sau: \"$input\", hãy: " +
         "1. Dịch chúng sang tiếng Trung (Pinyin và Hán tự). " +
         "2. Viết một đoạn văn với đầy đủ các từ khóa cung cấp ( ít nhất 300 từ trở lên) bằng chữ Hán sử dụng tất cả các từ đó. " +
-        "3. Cung cấp Pinyin cho đoạn văn, trong đó bôi đậm (dùng thẻ <b>) các từ khóa đã cho. " +
+        "3. Cung cấp Pinyin cho đoạn văn, trong đó bôi đậm (dùng thẻ <b> hoặc **) các từ khóa đã cho. " +
         "4. Dịch toàn bộ đoạn văn sang tiếng Việt. " +
         "5. Tạo một phiên bản dịch \"hỗn hợp\": lấy bản dịch tiếng Việt ở bước 4, nhưng thay thế các từ đã dịch bằng TỪ VỰNG GỐC (Pinyin) được tô đậm. " +
         "6. Liệt kê lại từ vựng đã dùng (pinyin và nghĩa). " +
-        "Trả về JSON có khóa: \"pinyin_paragraph\", \"hanzi_paragraph\", \"vietnamese_translation\", " +
-        "\"mixed_vietnamese_translation\", \"vocabulary_list\"."
+        "ĐỊNH DẠNG ĐẦU RA BẮT BUỘC: KHÔNG trả về JSON, KHÔNG dùng code block; trình bày trực tiếp, dễ đọc, theo đúng thứ tự các mục sau, mỗi mục có tiêu đề riêng: " +
+        "\"Viết Đoạn Văn\" (tiêu đề chung, ghi kèm danh sách từ khóa Hán tự đã dịch ở bước 1 kèm pinyin); " +
+        "\"🈶 Đoạn văn Hán tự:\" (một đoạn văn liền mạch bằng chữ Hán); " +
+        "\"📝 Đoạn văn Pinyin:\" (một đoạn văn liền mạch, từ khóa in đậm); " +
+        "\"📖 Bản dịch tiếng Việt:\" (một đoạn văn liền mạch); " +
+        "\"📖 Bản dịch hỗn hợp (Việt - Pinyin):\" (một đoạn văn liền mạch, từ khóa thay bằng pinyin in đậm); " +
+        "\"🗣️ Từ vựng đã sử dụng:\" (bảng 2 cột: Pinyin | Nghĩa). " +
+        "Pinyin phải có dấu thanh đầy đủ."
 
 @Composable
 fun KeywordChip(label: String, onClick: () -> Unit) {

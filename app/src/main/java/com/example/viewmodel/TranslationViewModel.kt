@@ -29,6 +29,8 @@ sealed class FeedbackState {
 
 const val MIN_AUTO_REPEAT = 1
 const val MAX_AUTO_REPEAT = 10
+const val MIN_AUTO_SPEED = 0.5f
+const val MAX_AUTO_SPEED = 2.0f
 
 class TranslationViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
@@ -67,6 +69,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     // Auto-scroll ("Tự cuộn"): số lần đọc lặp lại cho mỗi câu hỏi / đáp án
     val autoRepeatCount = mutableStateOf(2)
+    // Tốc độ Tự cuộn: 0.5x..2.0x (ảnh hưởng thời gian nghỉ và tốc độ đọc)
+    val autoSpeed = mutableStateOf(1f)
 
     // Writing practice (Tập viết chữ Hán)
     val writingFreeMode = mutableStateOf(false)
@@ -112,6 +116,22 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 repository.deleteStarredPair(existing.vi, existing.foreign)
             } else {
                 repository.insertStarredPair(StarredPair(vi = vi, foreign = foreign, language = language))
+            }
+        }
+    }
+
+    /** Gắn/bỏ sao hàng loạt cho danh sách (vi, foreign) bất kỳ, ví dụ danh sách luyện viết. */
+    fun setStarForPairs(pairs: List<Pair<String, String>>, language: String, star: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            fun key(a: String, b: String) = a.trim().lowercase() + "\u0000" + b.trim().lowercase()
+            val existing = allStarredPairs.value.associateBy { key(it.vi, it.foreign) }
+            pairs.forEach { (vi, foreign) ->
+                val found = existing[key(vi, foreign)]
+                if (star && found == null) {
+                    repository.insertStarredPair(StarredPair(vi = vi, foreign = foreign, language = language))
+                } else if (!star && found != null) {
+                    repository.deleteStarredPair(found.vi, found.foreign)
+                }
             }
         }
     }
@@ -600,6 +620,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 } else {
                     Locale.US
                 }
+                setSpeechRate(if (_isAutoPlaying.value) autoSpeed.value.coerceIn(0.6f, 2f) else 1f)
                 speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             }
 
@@ -690,8 +711,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 // --- PROMPT (QUESTION) BLOCK: N times ---
                 if (!speakRepeatedWhileAutoPlaying(promptText, promptLang, repeatTimes)) break
 
-                // Wait 1s after question is read before showing response
-                delay(1000)
+                // Wait after question is read before showing response
+                delay(scaledPause(1000L))
 
                 if (!_isAutoPlaying.value) break
 
@@ -701,8 +722,8 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
                 // --- ANSWER BLOCK: N times ---
                 if (!speakRepeatedWhileAutoPlaying(answerText, answerLang, repeatTimes)) break
 
-                // Wait 1.5s after answer speaking completes
-                delay(1500)
+                // Wait after answer speaking completes
+                delay(scaledPause(1500L))
 
                 if (!_isAutoPlaying.value) break
 
@@ -714,10 +735,19 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun speakRepeatedWhileAutoPlaying(text: String, lang: String, times: Int): Boolean {
         repeat(times) {
-            speakTextAndAwait(text, lang, extraDelayAfterMs = 1200L)
+            speakTextAndAwait(text, lang, extraDelayAfterMs = scaledPause(1200L))
             if (!_isAutoPlaying.value) return false
         }
         return true
+    }
+
+    private fun scaledPause(baseMs: Long): Long =
+        (baseMs / autoSpeed.value.coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)).toLong()
+
+    fun updateAutoSpeed(value: Float) {
+        autoSpeed.value = (Math.round(value * 10f) / 10f).coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)
+        getApplication<Application>().getSharedPreferences("StudyStatePrefs", Context.MODE_PRIVATE)
+            .edit().putFloat("autoSpeed", autoSpeed.value).apply()
     }
 
     fun updateAutoRepeatCount(value: Int) {
@@ -929,6 +959,7 @@ class TranslationViewModel(application: Application) : AndroidViewModel(applicat
         // Restore lockscreen setting
         isLockscreenEnabled.value = sharedPrefs.getBoolean("lockscreen_enabled", false)
         autoRepeatCount.value = sharedPrefs.getInt("autoRepeatCount", 2).coerceIn(MIN_AUTO_REPEAT, MAX_AUTO_REPEAT)
+        autoSpeed.value = sharedPrefs.getFloat("autoSpeed", 1f).coerceIn(MIN_AUTO_SPEED, MAX_AUTO_SPEED)
         writingFreeMode.value = sharedPrefs.getBoolean("writing_free", false)
         writingSpeed.value = sharedPrefs.getFloat("writing_speed", 1.5f).coerceIn(0.5f, 3f)
         writingWord.value = sharedPrefs.getString("writing_word", "") ?: ""
