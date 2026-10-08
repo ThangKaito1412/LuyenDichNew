@@ -2596,131 +2596,100 @@ fun PracticeScreenView(
                 is FeedbackState.Revealed -> {
                     val imageTerm = cleanKeyword(currentPair.foreign).ifBlank { cleanKeyword(currentPair.vi) }
                     val viTerm = cleanKeyword(currentPair.vi).ifBlank { imageTerm }
-                    // Mỗi lần khung đáp án hiện lại sẽ bốc ngẫu nhiên một ảnh trong top 5 kết quả Bing.
-                    val pick = remember { kotlin.random.Random.nextInt(5) }
                     val image by com.example.ui.rememberRemoteImage(
                         key = imageTerm + "|" + viTerm,
-                        // Ưu tiên tìm theo nghĩa tiếng Việt (ra ảnh sát nghĩa nhất, đã thử nghiệm); chữ Hán chỉ là dự phòng.
-                        queries = listOf(viTerm, imageTerm).distinct(),
-                        pick = pick
+                        urls = listOf(
+                            "https://tse1.mm.bing.net/th?q=" + java.net.URLEncoder.encode(imageTerm, "UTF-8") + "&w=900&h=520&c=7&rs=1&p=0",
+                            "https://tse2.mm.bing.net/th?q=" + java.net.URLEncoder.encode(viTerm, "UTF-8") + "&w=900&h=520&c=7&rs=1&p=0"
+                        )
                     )
                     val hasImage = image != null
                     // Khi có ảnh nền: luôn phủ lớp tối + chữ trắng để chữ không bị chìm theo màu ảnh.
                     val fg = if (hasImage) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                     val chipBg = if (hasImage) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
-                    val answerDensity = LocalDensity.current
-                    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                        ) {
-                            Box(modifier = Modifier.fillMaxWidth().heightIn(min = viewModel.answerCardHeight.value.dp)) {
-                                image?.let { bmp ->
-                                    androidx.compose.foundation.Image(
-                                        bitmap = bmp,
-                                        contentDescription = "Hình minh họa: $imageTerm",
-                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                        modifier = Modifier.matchParentSize()
-                                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Box(modifier = Modifier.fillMaxWidth().heightIn(min = 170.dp)) {
+                            image?.let { bmp ->
+                                androidx.compose.foundation.Image(
+                                    bitmap = bmp,
+                                    contentDescription = "Hình minh họa: $imageTerm",
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.matchParentSize()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.80f))
+                                            )
+                                        )
+                                )
+                            }
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "💡  Đáp án gợi ý:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = fg.copy(alpha = if (hasImage) 0.85f else 1f)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                    text = state.correctAnswer,
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = fg,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Box(
                                         modifier = Modifier
-                                            .matchParentSize()
-                                            .background(
-                                                Brush.verticalGradient(
-                                                    listOf(Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.80f))
-                                                )
-                                            )
-                                    )
-                                }
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text(
-                                        text = "💡  Đáp án gợi ý:",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = fg.copy(alpha = if (hasImage) 0.85f else 1f)
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    Text(
-                                        text = state.correctAnswer,
-                                        fontSize = 19.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = fg,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(chipBg)
+                                            .clickable { viewModel.speakAnswer() },
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(chipBg)
-                                                .clickable { viewModel.speakAnswer() },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.VolumeUp,
-                                                contentDescription = "Nghe",
-                                                modifier = Modifier.size(24.dp),
-                                                tint = fg
-                                            )
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.VolumeUp,
+                                            contentDescription = "Nghe",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = fg
+                                        )
+                                    }
 
-                                        Spacer(modifier = Modifier.width(12.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
 
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(if (isLooping) chipBg.copy(alpha = 0.35f) else chipBg)
-                                                .clickable { viewModel.toggleAudioLoop() },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Refresh,
-                                                contentDescription = "Lặp",
-                                                modifier = Modifier.size(24.dp),
-                                                tint = if (isLooping) Color(0xFFFF6B6B) else fg
-                                            )
-                                        }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isLooping) chipBg.copy(alpha = 0.35f) else chipBg)
+                                            .clickable { viewModel.toggleAudioLoop() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Lặp",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = if (isLooping) Color(0xFFFF6B6B) else fg
+                                        )
                                     }
                                 }
                             }
-                        }
-
-                        // Thanh kéo: kéo xuống để phóng to khung/hình nền, kéo lên để thu nhỏ
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(32.dp)
-                                .pointerInput(Unit) {
-                                    detectVerticalDragGestures(
-                                        onVerticalDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val deltaDp = with(answerDensity) { dragAmount.toDp() }
-                                            viewModel.updateAnswerCardHeight(viewModel.answerCardHeight.value + deltaDp.value)
-                                        },
-                                        onDragEnd = { viewModel.saveAnswerCardHeight() },
-                                        onDragCancel = { viewModel.saveAnswerCardHeight() }
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(52.dp)
-                                    .height(5.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
-                            )
                         }
                     }
                 }
