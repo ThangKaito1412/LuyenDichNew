@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -61,6 +62,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay
@@ -79,16 +81,26 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import android.content.Intent
+import android.net.Uri
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -468,10 +480,18 @@ private fun DemoSheet(
 // Word picker sheet
 // ---------------------------------------------------------------------------------------------
 
+data class WritingDeck(
+    val id: Long,
+    val title: String,
+    val rawContent: String,
+    val folderId: Long?
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun WordPickerSheet(
-    deckTitles: List<Pair<Long, String>>,
+    folders: List<com.example.data.Folder>,
+    decks: List<WritingDeck>,
     selectedDeckId: Long,
     onDeckSelected: (Long) -> Unit,
     words: List<StudyWord>,
@@ -487,6 +507,18 @@ private fun WordPickerSheet(
     var filter by remember { mutableStateOf("") }
     val colors = MaterialTheme.colorScheme
     val gold = Color(0xFFFFD700)
+
+    var selectedFolderId by remember {
+        mutableStateOf<Long?>(decks.find { it.id == selectedDeckId }?.folderId)
+    }
+
+    val folderDecks = remember(selectedFolderId, decks) {
+        if (selectedFolderId == null) {
+            decks.filter { it.folderId == null }
+        } else {
+            decks.filter { it.folderId == selectedFolderId }
+        }
+    }
 
     fun key(vi: String, foreign: String) = vi.trim().lowercase() + "\u0000" + foreign.trim().lowercase()
     val starKeys = remember(starred) { starred.map { key(it.vi, it.foreign) }.toSet() }
@@ -518,16 +550,64 @@ private fun WordPickerSheet(
             Text("Danh sách luyện viết", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Spacer(Modifier.height(10.dp))
 
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(deckTitles) { (id, title) ->
+            // 1. CHỌN THƯ MỤC
+            Text("1. Chọn thư mục:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.primary)
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val ungroupedCount = decks.count { it.folderId == null }
+                FilterChip(
+                    selected = selectedFolderId == null,
+                    onClick = {
+                        selectedFolderId = null
+                        val first = decks.firstOrNull { it.folderId == null }
+                        if (first != null) onDeckSelected(first.id)
+                    },
+                    label = { Text("📦 Chưa phân loại ($ungroupedCount)", fontSize = 11.5.sp) }
+                )
+
+                folders.forEach { folder ->
+                    val count = decks.count { it.folderId == folder.id }
                     FilterChip(
-                        selected = id == selectedDeckId,
-                        onClick = { onDeckSelected(id) },
-                        label = { Text(title, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        selected = selectedFolderId == folder.id,
+                        onClick = {
+                            selectedFolderId = folder.id
+                            val first = decks.firstOrNull { it.folderId == folder.id }
+                            if (first != null) onDeckSelected(first.id)
+                        },
+                        label = { Text("📂 ${folder.name} ($count)", fontSize = 11.5.sp) }
                     )
                 }
             }
             Spacer(Modifier.height(10.dp))
+
+            // 2. CHỌN BÀI HỌC TRONG THƯ MỤC
+            Text("2. Chọn bài học:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.primary)
+            Spacer(Modifier.height(4.dp))
+            if (folderDecks.isEmpty()) {
+                Text(
+                    "Thư mục này chưa có bài học nào chứa chữ Hán.",
+                    fontSize = 12.sp,
+                    color = colors.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            } else {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(folderDecks) { deck ->
+                        FilterChip(
+                            selected = deck.id == selectedDeckId,
+                            onClick = { onDeckSelected(deck.id) },
+                            label = { Text(deck.title, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+
             OutlinedTextField(
                 value = filter,
                 onValueChange = { filter = it },
@@ -572,7 +652,7 @@ private fun WordPickerSheet(
             if (shown.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        "Không có từ nào chứa chữ Hán trong danh sách này.",
+                        "Không có từ nào chứa chữ Hán trong bài học này.",
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,
                         color = colors.onSurface.copy(alpha = 0.5f)
@@ -660,13 +740,14 @@ private fun WordPickerSheet(
 fun WritingScreen(viewModel: TranslationViewModel) {
     val context = LocalContext.current
     val starredPairs by viewModel.allStarredPairs.collectAsState()
+    val folders by viewModel.allFolders.collectAsState()
     val colors = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val studySets by viewModel.allStudySets.collectAsState()
 
     BackHandler { viewModel.closeWriting() }
 
-    // --- Nguồn từ vựng: các bộ đề có chữ Hán + danh sách đang nhập ---
+    // --- Nguồn từ vựng: các bộ đề do người dùng tự tạo có chữ Hán (loại trừ các bộ đề mẫu preset) + danh sách đang nhập ---
     val rawInput = viewModel.rawTextContent.value
     // Danh sách đang luyện tập (đã xáo trộn giống hệt chế độ luyện học) đứng đầu để hai chế độ đồng bộ thứ tự.
     val practicePairs by viewModel.practicePairs.collectAsState()
@@ -675,16 +756,16 @@ fun WritingScreen(viewModel: TranslationViewModel) {
     }
     val decks = remember(studySets, rawInput, practiceRaw) {
         buildList {
-            if (containsCjk(practiceRaw)) add(Triple(-3L, "Đang luyện tập", practiceRaw))
-            if (containsCjk(rawInput)) add(Triple(-1L, "Đang nhập", rawInput))
-            studySets.filter { containsCjk(it.rawContent) }.forEach {
-                add(Triple(it.id, it.title.substringBefore(" ("), it.rawContent))
+            if (containsCjk(practiceRaw)) add(WritingDeck(-3L, "Đang luyện tập", practiceRaw, null))
+            if (containsCjk(rawInput)) add(WritingDeck(-1L, "Đang nhập", rawInput, null))
+            studySets.filter { !it.isPreset && containsCjk(it.rawContent) }.forEach {
+                add(WritingDeck(it.id, it.title.substringBefore(" ("), it.rawContent, it.folderId))
             }
         }
     }
-    var selectedDeckId by remember(decks) { mutableStateOf(decks.firstOrNull()?.first ?: -2L) }
+    var selectedDeckId by remember(decks) { mutableStateOf(decks.firstOrNull()?.id ?: -2L) }
     val deckWords = remember(selectedDeckId, decks) {
-        decks.firstOrNull { it.first == selectedDeckId }?.let { parseStudyWords(it.third) } ?: emptyList()
+        decks.firstOrNull { it.id == selectedDeckId }?.let { parseStudyWords(it.rawContent) } ?: emptyList()
     }
 
     var word by remember {
@@ -701,7 +782,9 @@ fun WritingScreen(viewModel: TranslationViewModel) {
         mutableIntStateOf(if (startAtLast) (chars.size - 1).coerceAtLeast(0) else 0)
     }
     LaunchedEffect(word) { startAtLast = false }
-    val blurChars = viewModel.writingFreeMode.value && viewModel.writingBlur.value
+    val blurMode = viewModel.writingBlurMode.value
+    val blurChars = viewModel.writingFreeMode.value && (blurMode == 1)
+    val hideSub = viewModel.writingFreeMode.value && (blurMode == 2)
     val autoSpeak = viewModel.writingAutoSpeak.value
     // Tự đọc: đổi từ -> đọc cả từ; đổi sang chữ khác trong từ -> đọc riêng chữ đó.
     LaunchedEffect(word, charIndex, autoSpeak) {
@@ -714,9 +797,11 @@ fun WritingScreen(viewModel: TranslationViewModel) {
     val currentChar = chars.getOrNull(charIndex)
     val mainScroll = rememberScrollState()
     val wordInfo = remember(word, decks) {
-        decks.firstNotNullOfOrNull { d -> parseStudyWords(d.third).firstOrNull { it.hanzi == word } }
+        decks.firstNotNullOfOrNull { d -> parseStudyWords(d.rawContent).firstOrNull { it.hanzi == word } }
     }
     val charResults = remember(word) { mutableStateMapOf<Int, Int>() }
+    var showSearchOptions by remember { mutableStateOf(false) }
+    var showWebViewUrl by remember { mutableStateOf<String?>(null) }
 
     // --- Tải dữ liệu nét chữ ---
     var reloadKey by remember { mutableIntStateOf(0) }
@@ -872,8 +957,101 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
-            RoundIconButton(Icons.Default.ViewList, "Danh sách từ") {
-                showPicker = true
+            RoundIconButton(Icons.Default.Search, "Tra cứu từ vựng") {
+                showSearchOptions = !showSearchOptions
+            }
+        }
+
+        // Bảng tra cứu nổi bật: HeyChinese & Lục Thư
+        AnimatedVisibility(
+            visible = showSearchOptions,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.secondaryContainer.copy(alpha = 0.35f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "Tra cứu chữ Hán: \"$word\"",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val clean = word.filter { isCjk(it) }.ifEmpty { word }
+                                val encW = java.net.URLEncoder.encode(clean, "UTF-8")
+                                val lastC = clean.lastOrNull()?.toString() ?: clean
+                                val encC = java.net.URLEncoder.encode(lastC, "UTF-8")
+                                showWebViewUrl = "https://heychinese.net/search/hanzi/$encW?hl=vi&c=$encC"
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+                        ) {
+                            Text("🏮 HeyChinese", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                val clean = word.filter { isCjk(it) }.ifEmpty { word }
+                                val prompt = """[Bảng phân tích chi tiết chữ Hán] Bạn là một chuyên gia ngôn ngữ học và Hán tự học. Hãy phân tích từ vựng chữ Hán: "$clean" theo các yêu cầu sau:
+1. Nhận diện toàn bộ các chữ Hán trong từ "$clean".
+2. Với TỪNG chữ Hán nhận diện được, hãy lập một BẢNG MARKDOWN phân tích theo 6 hàng tương ứng với 6 phương pháp tạo chữ ("Lục thư") (không cần cột STT để tối ưu không gian hiển thị). Cấu trúc trình bày cho mỗi chữ Hán như sau:
+### [Chữ Hán] — Phiên âm: [Pinyin & Hán Việt] — Ý nghĩa: [Nghĩa của từ]
+| Phương pháp Lục thư | Áp dụng | Phân tích chi tiết (Bộ thủ, Ký hiệu, Biểu ý / Biểu thanh) | Mẹo ghi nhớ / Câu chuyện chiết tự |
+|---|:---:|---|---|
+| Tượng hình (象形) | [Có / X] | ... | ... |
+| Chỉ sự (指事) | [Có / X] | ... | ... |
+| Hội ý (会意) | [Có / X] | ... | ... |
+| Hình thanh (形声) | [Có / X] | ... | ... |
+| Chuyển chú (转注) | [Có / X] | ... | ... |
+| Giả tá (假借) | [Có / X] | ... | ... |
+--- QUY TẮC ĐIỀN BẢNG ---
+- Ở cột "Áp dụng":
++ Nếu chữ CÓ sử dụng phương pháp đó: Ghi "Có".
++ Nếu chữ KHÔNG sử dụng phương pháp đó: Bắt buộc điền "X", hai cột phân tích phía sau của hàng đó cũng ghi "X".
+- Cột "Phân tích chi tiết": Nêu rõ thành phần cấu tạo (nét vẽ mô phỏng, ký hiệu chỉ điểm, bộ thủ chỉ nghĩa, thành phần chỉ âm đọc, hoặc sự chuyển nghĩa/mượn âm).
+- Cột "Mẹo ghi nhớ / Câu chuyện chiết tự": Nêu câu chuyện ngắn gọn, hình ảnh liên tưởng dễ nhớ giúp người học thuộc mặt chữ ngay lập tức.
+--- TIÊU CHÍ ĐỐI CHIẾU 6 PHƯƠNG PHÁP ---
+1. Tượng hình (象形): Vẽ mô phỏng lại hình ảnh thực tế của sự vật ngoài đời thực (nhìn thấy gì vẽ nấy như trăng, núi, cây).
+2. Chỉ sự (指事): Lấy chữ tượng hình sẵn có rồi thêm nét/ký hiệu chỉ điểm để chỉ vào vị trí cụ thể (như gốc cây, ngọn cây, trên, dưới).
+3. Hội ý (会意): Ghép nghĩa của hai hay nhiều thành phần lại để tạo thành một ý nghĩa mới hoàn toàn (như người tựa gốc cây thành chữ nghỉ ngơi).
+4. Hình thanh (形声): Gồm một phần biểu ý (chỉ ý nghĩa/bộ thủ) kết hợp với một phần biểu thanh (quyết định hoặc gợi ý âm đọc).
+5. Chuyển chú (转注): Mở rộng từ nghĩa gốc ban đầu, hoặc biến đổi/thêm nét từ chữ gốc để tạo thành nghĩa mới có quan hệ mật thiết với gốc.
+6. Giả tá (假借): Mượn hình chữ và âm đọc có sẵn để biểu thị một khái niệm mới hoàn toàn (nghĩa gốc dần không còn dùng nữa).""".trimIndent()
+                                showWebViewUrl = "https://www.google.com/search?q=" + java.net.URLEncoder.encode(prompt, "UTF-8")
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.secondary)
+                        ) {
+                            Text("📜 Lục Thư", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                val clean = word.filter { isCjk(it) }.ifEmpty { word }
+                                val enc = java.net.URLEncoder.encode(clean, "UTF-8")
+                                showWebViewUrl = "https://hanzii.net/search/word/$enc?hl=vi"
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceVariant, contentColor = colors.onSurfaceVariant)
+                        ) {
+                            Text("⛩️ Hanzii", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
             }
         }
 
@@ -923,7 +1101,14 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                             if (!wordInfo?.pinyin.isNullOrBlank()) append("[${wordInfo!!.pinyin}]  ")
                             if (!wordInfo?.meaning.isNullOrBlank()) append(wordInfo!!.meaning)
                         }
-                        if (sub.isNotBlank()) {
+                        if (hideSub) {
+                            Text(
+                                "●●●●●  ●●●●●●",
+                                fontSize = 13.sp,
+                                color = colors.onSurface.copy(alpha = 0.25f),
+                                modifier = Modifier.blur(8.dp)
+                            )
+                        } else if (sub.isNotBlank()) {
                             Text(
                                 sub,
                                 fontSize = 13.sp,
@@ -960,21 +1145,39 @@ fun WritingScreen(viewModel: TranslationViewModel) {
                         }
                     }
                     if (freeMode) {
+                        val icon = if (blurMode == 0) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                        val tint = when (blurMode) {
+                            1 -> colors.primary
+                            2 -> Color(0xFFFF6B6B)
+                            else -> colors.onSurface
+                        }
+                        val bg = when (blurMode) {
+                            1 -> colors.primary.copy(alpha = 0.16f)
+                            2 -> Color(0xFFFF6B6B).copy(alpha = 0.16f)
+                            else -> colors.surfaceVariant.copy(alpha = 0.7f)
+                        }
+                        val desc = when (blurMode) {
+                            1 -> "Đang mờ chữ Hán (Chạm để che phiên âm & nghĩa, hiện chữ Hán)"
+                            2 -> "Đang che phiên âm & nghĩa (Chạm để hiện tất cả)"
+                            else -> "Đang hiện tất cả (Chạm để mờ chữ Hán)"
+                        }
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(if (blurChars) colors.primary.copy(alpha = 0.16f) else colors.surfaceVariant.copy(alpha = 0.7f))
+                                .background(bg)
                                 .clickable {
-                                    viewModel.writingBlur.value = !viewModel.writingBlur.value
+                                    val next = (blurMode + 1) % 3
+                                    viewModel.writingBlurMode.value = next
+                                    viewModel.writingBlur.value = (next > 0)
                                     viewModel.saveWritingPrefs()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (blurChars) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (blurChars) "Hiện chữ Hán" else "Làm mờ chữ Hán",
-                                tint = if (blurChars) colors.primary else colors.onSurface,
+                                imageVector = icon,
+                                contentDescription = desc,
+                                tint = tint,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -1257,7 +1460,8 @@ fun WritingScreen(viewModel: TranslationViewModel) {
 
     if (showPicker) {
         WordPickerSheet(
-            deckTitles = decks.map { it.first to it.second },
+            folders = folders,
+            decks = decks,
             selectedDeckId = selectedDeckId,
             onDeckSelected = { selectedDeckId = it },
             words = deckWords,
@@ -1278,6 +1482,154 @@ fun WritingScreen(viewModel: TranslationViewModel) {
             },
             onDismiss = { showPicker = false }
         )
+    }
+
+    if (showWebViewUrl != null) {
+        WritingWebViewDialog(
+            url = showWebViewUrl!!,
+            onDismiss = { showWebViewUrl = null }
+        )
+    }
+}
+
+@Composable
+private fun WritingWebViewDialog(
+    url: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var loadedUrl by remember { mutableStateOf<String?>(url) }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Tra cứu",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Tra cứu chữ Hán",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (webViewRef?.canGoBack() == true) webViewRef?.goBack()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Trở về", modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = { webViewRef?.reload() },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Tải lại", modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    android.widget.Toast.makeText(context, "Không mở được trình duyệt ngoài", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = "Mở ngoài", modifier = Modifier.size(18.dp))
+                        }
+
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(36.dp),
+                            colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Đóng", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                val webViewInstance = this
+                                webViewClient = WebViewClient()
+                                webChromeClient = WebChromeClient()
+
+                                android.webkit.CookieManager.getInstance().apply {
+                                    setAcceptCookie(true)
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                        setAcceptThirdPartyCookies(webViewInstance, true)
+                                    }
+                                }
+
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    javaScriptCanOpenWindowsAutomatically = true
+                                    useWideViewPort = true
+                                    loadWithOverviewMode = true
+                                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+
+                                    val originalUA = userAgentString
+                                    val cleanUA = originalUA.replace("; wv", "").replace("Version/4.0 ", "")
+                                    userAgentString = if (cleanUA.contains("Safari/537.36")) {
+                                        cleanUA.substringBefore("Safari/537.36") + "Safari/537.36"
+                                    } else {
+                                        cleanUA
+                                    }
+                                }
+                                loadUrl(url)
+                            }
+                        },
+                        update = { webView ->
+                            webViewRef = webView
+                            if (url != loadedUrl) {
+                                loadedUrl = url
+                                webView.loadUrl(url)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
     }
 }
 

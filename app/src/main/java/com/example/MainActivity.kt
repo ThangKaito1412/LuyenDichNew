@@ -2074,7 +2074,7 @@ fun PracticeScreenView(
                                             label = "📝 Viết đoạn văn",
                                             onClick = {
                                                 if (paragraphKeywords.isBlank()) {
-                                                    paragraphKeywords = cleanKeyword(activePair.vi)
+                                                    paragraphKeywords = cleanKeyword(activePair.foreign)
                                                 }
                                                 showParagraphDialog = true
                                             }
@@ -2750,7 +2750,7 @@ fun PracticeScreenView(
                     contentColor = if (isAutoPlaying) Color.White else MaterialTheme.colorScheme.primary
                 ),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp, horizontal = 2.dp),
-                modifier = Modifier.weight(1.0f).height(42.dp)
+                modifier = Modifier.weight(1.1f).height(42.dp)
             ) {
                 Icon(
                     imageVector = if (isAutoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -2759,6 +2759,19 @@ fun PracticeScreenView(
                 )
                 Spacer(modifier = Modifier.width(3.dp))
                 Text(if (isAutoPlaying) "Dừng Auto" else "Tự cuộn", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // Nút "Bỏ qua" kế nút tự cuộn để bỏ qua câu hiện tại và lướt lên
+            Button(
+                onClick = { viewModel.nextItem() },
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp, horizontal = 2.dp),
+                modifier = Modifier.weight(1.0f).height(42.dp)
+            ) {
+                Icon(Icons.Default.SkipNext, contentDescription = "Bỏ qua", modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(2.dp))
+                Text("Bỏ qua", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -2824,12 +2837,12 @@ fun PracticeScreenView(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        KeywordChip("＋ Câu hiện tại") { addKeywords(listOf(currentPair.vi)) }
+                        KeywordChip("＋ Câu hiện tại") { addKeywords(listOf(currentPair.foreign)) }
                         KeywordChip("＋ 5 câu tiếp") {
-                            addKeywords((0 until minOf(5, total)).map { practicePairs[(currentIndex + it) % total].vi })
+                            addKeywords((0 until minOf(5, total)).map { practicePairs[(currentIndex + it) % total].foreign })
                         }
                         KeywordChip("＋ 10 câu tiếp") {
-                            addKeywords((0 until minOf(10, total)).map { practicePairs[(currentIndex + it) % total].vi })
+                            addKeywords((0 until minOf(10, total)).map { practicePairs[(currentIndex + it) % total].foreign })
                         }
                         KeywordChip("⭐ Câu gắn sao") {
                             val starred = practicePairs.filter { pair ->
@@ -2841,10 +2854,10 @@ fun PracticeScreenView(
                             if (starred.isEmpty()) {
                                 Toast.makeText(context, "Chưa có câu nào được gắn sao", Toast.LENGTH_SHORT).show()
                             } else {
-                                addKeywords(starred.map { it.vi })
+                                addKeywords(starred.map { it.foreign })
                             }
                         }
-                        KeywordChip("Cả bộ đề") { addKeywords(practicePairs.map { it.vi }) }
+                        KeywordChip("Cả bộ đề") { addKeywords(practicePairs.map { it.foreign }) }
                         KeywordChip("✕ Xóa hết") { paragraphKeywords = "" }
                     }
 
@@ -3090,20 +3103,20 @@ fun mergeKeywords(existing: String, extra: List<String>): String =
         .joinToString(", ")
 
 fun buildParagraphPrompt(input: String): String =
-    "Sử dụng các từ vựng sau: \"$input\", hãy: " +
-        "1. Dịch chúng sang tiếng Trung (Pinyin và Hán tự). " +
-        "2. Viết một đoạn văn với đầy đủ các từ khóa cung cấp ( ít nhất 300 từ trở lên) bằng chữ Hán sử dụng tất cả các từ đó. " +
-        "3. Cung cấp Pinyin cho đoạn văn, trong đó bôi đậm (dùng thẻ <b> hoặc **) các từ khóa đã cho. " +
-        "4. Dịch toàn bộ đoạn văn sang tiếng Việt. " +
+    "Sử dụng các từ vựng chữ Hán sau: \"$input\", hãy: " +
+        "1. Cung cấp Pinyin và dịch nghĩa tiếng Việt cho các từ vựng này. " +
+        "2. Viết một đoạn văn hoàn chỉnh (ít nhất 300 từ trở lên) bằng chữ Hán sử dụng tất cả các từ vựng trên. " +
+        "3. Cung cấp Pinyin cho toàn bộ đoạn văn, trong đó bôi đậm (dùng thẻ <b> hoặc **) các từ khóa đã cho. " +
+        "4. Dịch toàn bộ đoạn văn sang tiếng Việt chuẩn, tự nhiên. " +
         "5. Tạo một phiên bản dịch \"hỗn hợp\": lấy bản dịch tiếng Việt ở bước 4, nhưng thay thế các từ đã dịch bằng TỪ VỰNG GỐC (Pinyin) được tô đậm. " +
-        "6. Liệt kê lại từ vựng đã dùng (pinyin và nghĩa). " +
+        "6. Liệt kê lại bảng từ vựng đã dùng (Chữ Hán | Pinyin | Nghĩa tiếng Việt). " +
         "ĐỊNH DẠNG ĐẦU RA BẮT BUỘC: KHÔNG trả về JSON, KHÔNG dùng code block; trình bày trực tiếp, dễ đọc, theo đúng thứ tự các mục sau, mỗi mục có tiêu đề riêng: " +
-        "\"Viết Đoạn Văn\" (tiêu đề chung, ghi kèm danh sách từ khóa Hán tự đã dịch ở bước 1 kèm pinyin); " +
+        "\"Viết Đoạn Văn Từ Khóa\" (tiêu đề chung, liệt kê danh sách từ khóa kèm pinyin và nghĩa); " +
         "\"🈶 Đoạn văn Hán tự:\" (một đoạn văn liền mạch bằng chữ Hán); " +
         "\"📝 Đoạn văn Pinyin:\" (một đoạn văn liền mạch, từ khóa in đậm); " +
         "\"📖 Bản dịch tiếng Việt:\" (một đoạn văn liền mạch); " +
         "\"📖 Bản dịch hỗn hợp (Việt - Pinyin):\" (một đoạn văn liền mạch, từ khóa thay bằng pinyin in đậm); " +
-        "\"🗣️ Từ vựng đã sử dụng:\" (bảng 2 cột: Pinyin | Nghĩa). " +
+        "\"🗣️ Từ vựng đã sử dụng:\" (bảng: Chữ Hán | Pinyin | Nghĩa). " +
         "Pinyin phải có dấu thanh đầy đủ."
 
 @Composable
